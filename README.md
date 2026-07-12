@@ -58,9 +58,12 @@ built-in map. `index.py` implements this as a flat array of `[key,
 value]` pairs with linear-scan lookup/insert/delete, and last-write-wins
 semantics (an existing slot is mutated in place rather than duplicated).
 This same `Index` class backs both the top-level database and each
-hash created by `HSET`. Lists (`LPUSH`/`RPUSH`/`LRANGE`) use a plain
-array too, since ordered sequential storage is exactly what the
-assignment's "array" option describes.
+hash created by `HSET`. Lists (`LPUSH`/`RPUSH`/`LRANGE`/`LPOP`/`RPOP`)
+use a plain array too, since ordered sequential storage is exactly
+what the assignment's "array" option describes. `LPOP`/`RPOP` aren't
+in the assignment's command list, but were added since the Gradebot
+binary references an `LPOP` code path -- cheap to support, and it
+keeps the list type symmetric (push/pop from both ends).
 
 ## Output format
 

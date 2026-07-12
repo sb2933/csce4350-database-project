@@ -111,6 +111,14 @@ class KVStore:
                 entry = Entry("list", [])
                 self.index.set(record["key"], entry)
             entry.data.append(record["value"])
+        elif op == "LPOP":
+            entry = self.index.get(record["key"])
+            if entry is not None and entry.type == "list" and entry.data:
+                entry.data.pop(0)
+        elif op == "RPOP":
+            entry = self.index.get(record["key"])
+            if entry is not None and entry.type == "list" and entry.data:
+                entry.data.pop()
         elif op == "FLUSHDB":
             self.index.clear()
         else:
@@ -332,6 +340,26 @@ class KVStore:
         if start > stop or n == 0:
             return "END"
         return "\n".join(lst[start:stop + 1] + ["END"])
+
+    def cmd_LPOP(self, args):
+        if len(args) != 1:
+            raise StoreError("LPOP requires <key>")
+        entry = self._live_entry(args[0])
+        if entry is None or entry.type != "list" or not entry.data:
+            return ""
+        value = entry.data[0]
+        self._commit({"op": "LPOP", "key": args[0]})
+        return value
+
+    def cmd_RPOP(self, args):
+        if len(args) != 1:
+            raise StoreError("RPOP requires <key>")
+        entry = self._live_entry(args[0])
+        if entry is None or entry.type != "list" or not entry.data:
+            return ""
+        value = entry.data[-1]
+        self._commit({"op": "RPOP", "key": args[0]})
+        return value
 
     # -- counters -----------------------------------------------------
     def _incr_by(self, key, delta):

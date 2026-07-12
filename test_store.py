@@ -83,6 +83,15 @@ class TestKVStore(unittest.TestCase):
         self.db.execute("LPUSH l z")
         self.assertEqual(self.db.execute("LRANGE l 0 -1"), "z\na\nb\nEND")
 
+    def test_list_pop(self):
+        self.db.execute("RPUSH l a")
+        self.db.execute("RPUSH l b")
+        self.db.execute("RPUSH l c")
+        self.assertEqual(self.db.execute("LPOP l"), "a")
+        self.assertEqual(self.db.execute("RPOP l"), "c")
+        self.assertEqual(self.db.execute("LRANGE l 0 -1"), "b\nEND")
+        self.assertEqual(self.db.execute("LPOP missing"), "")
+
     def test_range(self):
         self.db.execute("SET a 1")
         self.db.execute("SET b 2")
