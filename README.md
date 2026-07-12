@@ -64,11 +64,45 @@ assignment's "array" option describes.
 
 ## Output format
 
-Responses loosely follow redis-cli conventions: `OK`, `(integer) N`,
-`(nil)`, `(empty)` for an empty multi-value result, and `(error) ...`
-for errors. **If Gradebot expects an different exact format, adjust the
-return strings in `store.py`** — they're centralized in one place per
-command handler.
+Single-value commands (`GET`, `HGET`) return an **empty line** for a
+missing key/field rather than a placeholder like `(nil)`.
+
+`MGET` returns exactly one line per requested key, in order (blank for
+a missing key) -- the caller already knows how many lines to expect
+from the number of keys it asked for.
+
+`RANGE` and `LRANGE` return a variable number of lines that the caller
+can't know in advance, so each is terminated with a literal `END`
+line so the reader knows when the response is complete.
+
+Everything else follows loose redis-cli conventions: `OK`, `(integer)
+N`, `(error) ...` for errors.
+
+**These formats were tuned against real feedback from a Gradebot run**
+(see the "Known issues found & fixed" section below) -- if your
+grading run surfaces a different expectation, the return values are
+centralized in one place per command handler in `store.py`, so they're
+easy to adjust further.
+
+## Known issues found & fixed
+
+Two real bugs were caught while testing against Gradebot and are worth
+knowing about if you're extending this project:
+
+1. **stdin read-ahead stall.** `main.py` originally read commands with
+   `for line in sys.stdin:`. Iterating a file object like that uses an
+   internal read-ahead buffer that can delay processing a line until
+   more data has arrived on the pipe -- a real problem for a
+   black-box tester that writes one command at a time and waits for a
+   response before sending the next. Switched to an explicit
+   `sys.stdin.readline()` loop, which does not have that behavior.
+2. **Unknown-length responses need a terminator.** `RANGE` and
+   `LRANGE` can return anywhere from zero to many lines, which the
+   caller has no way to know in advance. Without a sentinel, a caller
+   reading a fixed number of lines will under-read, leaving stray
+   output in the pipe that gets misread as the response to the *next*
+   command -- causing every subsequent command in the session to
+   desync. Both now emit a trailing `END` line.
 
 ## Testing
 
