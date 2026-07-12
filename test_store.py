@@ -53,7 +53,7 @@ class TestKVStore(unittest.TestCase):
     def test_set_get(self):
         self.assertEqual(self.db.execute("SET a 1"), "OK")
         self.assertEqual(self.db.execute("GET a"), "1")
-        self.assertEqual(self.db.execute("GET missing"), "(nil)")
+        self.assertEqual(self.db.execute("GET missing"), "")
 
     def test_del_exists(self):
         self.db.execute("SET a 1")
@@ -64,7 +64,7 @@ class TestKVStore(unittest.TestCase):
 
     def test_mset_mget(self):
         self.db.execute("MSET x 1 y 2")
-        self.assertEqual(self.db.execute("MGET x y z"), "1 2 (nil)")
+        self.assertEqual(self.db.execute("MGET x y z"), "1\n2\n")
 
     def test_incr_decr(self):
         self.assertEqual(self.db.execute("INCR n"), "(integer) 1")
@@ -75,19 +75,19 @@ class TestKVStore(unittest.TestCase):
         self.assertEqual(self.db.execute("HSET h f1 v1"), "(integer) 1")
         self.assertEqual(self.db.execute("HSET h f1 v2"), "(integer) 0")
         self.assertEqual(self.db.execute("HGET h f1"), "v2")
-        self.assertEqual(self.db.execute("HGET h nofield"), "(nil)")
+        self.assertEqual(self.db.execute("HGET h nofield"), "")
 
     def test_list(self):
         self.db.execute("RPUSH l a")
         self.db.execute("RPUSH l b")
         self.db.execute("LPUSH l z")
-        self.assertEqual(self.db.execute("LRANGE l 0 -1"), "z\na\nb")
+        self.assertEqual(self.db.execute("LRANGE l 0 -1"), "z\na\nb\nEND")
 
     def test_range(self):
         self.db.execute("SET a 1")
         self.db.execute("SET b 2")
         self.db.execute("SET z 3")
-        self.assertEqual(self.db.execute("RANGE a b"), "a 1\nb 2")
+        self.assertEqual(self.db.execute("RANGE a b"), "a\nb\nEND")
 
     def test_ttl_expiry(self):
         self.db.execute("SET a 1")
@@ -103,7 +103,7 @@ class TestKVStore(unittest.TestCase):
     def test_transaction_commit(self):
         self.db.execute("BEGIN")
         self.db.execute("SET t 1")
-        self.assertEqual(self.db.execute("GET t"), "(nil)")  # not committed yet
+        self.assertEqual(self.db.execute("GET t"), "")  # not committed yet
         self.db.execute("COMMIT")
         self.assertEqual(self.db.execute("GET t"), "1")
 
@@ -111,12 +111,12 @@ class TestKVStore(unittest.TestCase):
         self.db.execute("BEGIN")
         self.db.execute("SET t 1")
         self.db.execute("ABORT")
-        self.assertEqual(self.db.execute("GET t"), "(nil)")
+        self.assertEqual(self.db.execute("GET t"), "")
 
     def test_flushdb(self):
         self.db.execute("SET a 1")
         self.db.execute("FLUSHDB")
-        self.assertEqual(self.db.execute("GET a"), "(nil)")
+        self.assertEqual(self.db.execute("GET a"), "")
 
 
 class TestPersistence(unittest.TestCase):
@@ -141,7 +141,7 @@ class TestPersistence(unittest.TestCase):
         db2 = KVStore(self.path)  # simulates a fresh process replaying the log
         self.assertEqual(db2.execute("GET a"), "1")
         self.assertEqual(db2.execute("HGET h f"), "v")
-        self.assertEqual(db2.execute("LRANGE l 0 -1"), "x")
+        self.assertEqual(db2.execute("LRANGE l 0 -1"), "x\nEND")
         db2.close()
 
     def test_torn_last_write_is_discarded_not_fatal(self):
@@ -160,7 +160,7 @@ class TestPersistence(unittest.TestCase):
 
         db2 = KVStore(self.path)  # must not crash on corrupted tail
         self.assertEqual(db2.execute("GET a"), "1")
-        self.assertEqual(db2.execute("GET b"), "(nil)")  # torn write discarded
+        self.assertEqual(db2.execute("GET b"), "")  # torn write discarded
         db2.execute("SET c 3")
         db2.close()
 

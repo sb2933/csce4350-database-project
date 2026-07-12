@@ -155,7 +155,7 @@ class KVStore:
             raise StoreError("GET requires <key>")
         entry = self._live_entry(args[0])
         if entry is None:
-            return "(nil)"
+            return ""
         if entry.type != "string":
             raise StoreError("wrong type for GET")
         return entry.data
@@ -187,10 +187,10 @@ class KVStore:
         for k in args:
             entry = self._live_entry(k)
             if entry is None or entry.type != "string":
-                out.append("(nil)")
+                out.append("")
             else:
                 out.append(entry.data)
-        return " ".join(out)
+        return "\n".join(out)
 
     # -- expiration -------------------------------------------------------
     def cmd_EXPIRE(self, args):
@@ -226,15 +226,12 @@ class KVStore:
         start, end = args
         matches = []
         for key in self.index.keys():
-            entry = self._live_entry(key)
-            if entry is None or entry.type != "string":
+            if self._live_entry(key) is None:  # also prunes expired keys
                 continue
             if start <= key <= end:
-                matches.append((key, entry.data))
-        matches.sort(key=lambda kv: kv[0])
-        if not matches:
-            return "(empty)"
-        return "\n".join(f"{k} {v}" for k, v in matches)
+                matches.append(key)
+        matches.sort()
+        return "\n".join(matches + ["END"])
 
     # -- transactions ---------------------------------------------------
     def cmd_BEGIN(self, args):
@@ -281,19 +278,19 @@ class KVStore:
             raise StoreError("HGET requires <hash> <key>")
         entry = self._live_entry(args[0])
         if entry is None or entry.type != "hash":
-            return "(nil)"
+            return ""
         value = entry.data.get(args[1])
-        return "(nil)" if value is None else value
+        return "" if value is None else value
 
     def cmd_HGETALL(self, args):
         if len(args) != 1:
             raise StoreError("HGETALL requires <hash>")
         entry = self._live_entry(args[0])
         if entry is None or entry.type != "hash":
-            return "(empty)"
+            return ""
         items = entry.data.items()
         if not items:
-            return "(empty)"
+            return ""
         return "\n".join(f"{k} {v}" for k, v in items)
 
     # -- lists --------------------------------------------------------
@@ -323,7 +320,7 @@ class KVStore:
             raise StoreError("LRANGE start/stop must be integers")
         entry = self._live_entry(key)
         if entry is None or entry.type != "list":
-            return "(empty)"
+            return "END"
         lst = entry.data
         n = len(lst)
         # normalize negative indices, redis-style inclusive range
@@ -333,8 +330,8 @@ class KVStore:
             stop = n + stop
         stop = min(stop, n - 1)
         if start > stop or n == 0:
-            return "(empty)"
-        return "\n".join(lst[start:stop + 1])
+            return "END"
+        return "\n".join(lst[start:stop + 1] + ["END"])
 
     # -- counters -----------------------------------------------------
     def _incr_by(self, key, delta):
