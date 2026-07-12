@@ -2,3 +2,7 @@ data.db
 __pycache__/
 *.pyc
 .pytest_cache/
+
+gradebot
+gradebot_Linux_x86_64.tar.gz
+LICENSE

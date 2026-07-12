@@ -1,143 +1,133 @@
-# Simple Key-Value Store
+# CSCE 4350 Gradebot
 
-A persistent, command-line key-value database built from scratch in Python,
-following the "Build Your Own Database" approach: an append-only log for
-durability, and a hand-rolled (non-`dict`) in-memory index.
+[![Go Version](https://img.shields.io/github/go-mod/go-version/jh125486/CSCE4350_gradebot)](https://golang.org/)
+[![Build Status](https://github.com/jh125486/CSCE4350_gradebot/workflows/test/badge.svg)](https://github.com/jh125486/CSCE4350_gradebot/actions)
+[![Coverage Status](https://codecov.io/gh/jh125486/CSCE4350_gradebot/branch/main/graph/badge.svg)](https://codecov.io/gh/jh125486/CSCE4350_gradebot)
+[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=jh125486_CSCE4350_gradebot&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=jh125486_CSCE4350_gradebot)
+[![Go Report Card](https://goreportcard.com/badge/github.com/jh125486/CSCE4350_gradebot)](https://goreportcard.com/report/github.com/jh125486/CSCE4350_gradebot)
+[![Release](https://img.shields.io/github/release/jh125486/CSCE4350_gradebot.svg)](https://github.com/jh125486/CSCE4350_gradebot/releases)
 
-## Running
+Automated code grading system for CSCE 4350 assignments.
 
-```bash
-python3 main.py            # uses ./data.db
-python3 main.py mydata.db  # or a custom path
-```
+## Features
 
-Commands are read one per line from STDIN, responses are written to STDOUT.
-Type `EXIT` or send EOF to quit.
+- **Server Mode**: HTTP server for receiving and grading code submissions
+- **Client Mode**: CLI tool for submitting assignments for grading
+- **OpenAI Integration**: Uses GPT-4o Mini for code analysis and feedback
+- **Web Interface**: HTML dashboard for viewing submissions and grades
+- **Cross-Platform**: Native binaries for Linux, macOS, and Windows
+- **Koyeb Deployment**: Optimized for cloud deployment
 
 ## Architecture
 
-| File         | Responsibility                                                             |
-|--------------|-----------------------------------------------------------------------------|
-| `index.py`   | Custom array-based key→value index (linear scan, no built-in `dict`/`map`). |
-| `log.py`     | Append-only, checksummed, `fsync`'ed on-disk log (`data.db`).               |
-| `store.py`   | The database engine: command handlers, TTL, transactions, replay logic.     |
-| `main.py`    | STDIN/STDOUT REPL, the black-box-testable entry point.                      |
+### Overview
 
-### Persistence
+The gradebot consists of:
 
-Every mutating command is turned into a small canonical JSON record
-(e.g. `{"op": "SET", "key": "a", "value": "1"}`), which is:
+- **Server**: HTTP API server handling grading requests
+- **Client**: CLI tool for submitting assignments
+- **Rubrics**: Evaluation logic and test runners
 
-1. applied to the in-memory `Index`, and
-2. appended as one line to `data.db`, prefixed with a CRC32 checksum,
-   then `flush()`'ed and `fsync()`'ed before the command returns.
+## Local Development
 
-On startup, the log is replayed in order to rebuild the index from scratch.
-If the process crashed mid-write last time, the final line may be
-incomplete or fail its checksum — that line (and only that line, since
-everything before it was already `fsync`'ed) is discarded, and the file
-is truncated back to the last valid record so future writes aren't glued
-onto corrupted bytes.
+### Setup
 
-`EXPIRE key seconds` is converted to an absolute `EXPIREAT` record before
-being logged, so TTLs survive a restart correctly instead of restarting
-the countdown from whenever the log happens to be replayed.
+1. **Clone the repository**:
 
-### Transactions
+   ```bash
+   git clone https://github.com/jh125486/CSCE4350_gradebot.git
+   cd CSCE4350_gradebot
+   ```
 
-`BEGIN` starts buffering subsequent mutating commands in memory without
-applying or persisting them. `COMMIT` applies and logs the whole buffered
-block in order; `ABORT` discards it. Reads always see the last committed
-state — writes made inside an open transaction are not visible until
-`COMMIT`.
+2. **Set up environment variables**:
 
-### Indexing
+   ```bash
+   # Copy the example environment file
+   cp .env.example .env
+   
+   # Edit .env with your actual secrets
+   nano .env  # or your preferred editor
+   ```
 
-The assignment requires a hand-built index rather than a language
-built-in map. `index.py` implements this as a flat array of `[key,
-value]` pairs with linear-scan lookup/insert/delete, and last-write-wins
-semantics (an existing slot is mutated in place rather than duplicated).
-This same `Index` class backs both the top-level database and each
-hash created by `HSET`. Lists (`LPUSH`/`RPUSH`/`LRANGE`/`LPOP`/`RPOP`)
-use a plain array too, since ordered sequential storage is exactly
-what the assignment's "array" option describes. `LPOP`/`RPOP` aren't
-in the assignment's command list, but were added since the Gradebot
-binary references an `LPOP` code path -- cheap to support, and it
-keeps the list type symmetric (push/pop from both ends).
+3. **Initialize development environment**:
 
-## Output format
+   ```bash
+   go mod tidy
+   make init    # Installs git hooks
+   make build
+   ```
 
-Single-value commands (`GET`, `HGET`) return an **empty line** for a
-missing key/field rather than a placeholder like `(nil)`.
+   The `make init` command installs a pre-push hook that runs tests and linting before allowing a push.
 
-`MGET` returns exactly one line per requested key, in order (blank for
-a missing key) -- the caller already knows how many lines to expect
-from the number of keys it asked for.
+### Testing Locally
 
-`RANGE` and `LRANGE` return a variable number of lines that the caller
-can't know in advance, so each is terminated with a literal `END`
-line so the reader knows when the response is complete.
+The application automatically loads environment variables from a `.env` file when running locally.
 
-Everything else follows loose redis-cli conventions: `OK`, `(integer)
-N`, `(error) ...` for errors.
-
-**These formats were tuned against real feedback from a Gradebot run**
-(see the "Known issues found & fixed" section below) -- if your
-grading run surfaces a different expectation, the return values are
-centralized in one place per command handler in `store.py`, so they're
-easy to adjust further.
-
-## Known issues found & fixed
-
-Two real bugs were caught while testing against Gradebot and are worth
-knowing about if you're extending this project:
-
-1. **stdin read-ahead stall.** `main.py` originally read commands with
-   `for line in sys.stdin:`. Iterating a file object like that uses an
-   internal read-ahead buffer that can delay processing a line until
-   more data has arrived on the pipe -- a real problem for a
-   black-box tester that writes one command at a time and waits for a
-   response before sending the next. Switched to an explicit
-   `sys.stdin.readline()` loop, which does not have that behavior.
-2. **Unknown-length responses need a terminator.** `RANGE` and
-   `LRANGE` can return anywhere from zero to many lines, which the
-   caller has no way to know in advance. Without a sentinel, a caller
-   reading a fixed number of lines will under-read, leaving stray
-   output in the pipe that gets misread as the response to the *next*
-   command -- causing every subsequent command in the session to
-   desync. Both now emit a trailing `END` line.
-
-## Testing
+**Start the server**:
 
 ```bash
-python3 -m unittest discover -v
+# Using Makefile
+make local-test
+
+# Or manually
+./bin/gradebot server --port 8080
 ```
 
-`test_store.py` covers the custom index, all commands, transactions, and
-two persistence scenarios: a clean restart, and recovery from a
-simulated crash (torn/corrupted final log write).
-
-## Linting
+**Test the client**:
 
 ```bash
-pip install flake8
-flake8 . --max-line-length=100
+# Submit a project for grading
+./bin/gradebot project1 --dir /path/to/your/project --run "python main.py"
 ```
 
-Enforced automatically in CI (`.github/workflows/ci.yml`) on every push.
+### Environment Variables
 
-## Blackbox testing (Gradebot)
+The following environment variables are required for full functionality:
 
-1. Work directory: the repo root.
-2. Command to run: `python3 main.py`
-3. After running Gradebot, save the rubric screenshot as
-   `gradebot_screenshot.png` in the repo root and commit it.
+- `OPENAI_API_KEY`: Your OpenAI API key
+- `BUILD_ID`: Unique build identifier for authentication
+- `R2_ENDPOINT`: Cloudflare R2 endpoint URL
+- `AWS_ACCESS_KEY_ID`: R2 access key
+- `AWS_SECRET_ACCESS_KEY`: R2 secret key
 
-## Git
+Optional variables:
 
-Tag the final working version:
+- `R2_BUCKET`: Custom bucket name (defaults to "gradebot-storage")
+- `AWS_REGION`: AWS region (defaults to "auto")
+- `USE_PATH_STYLE`: Use path-style S3 URLs (for LocalStack testing)
+
+### Development Workflow
+
+**Run tests**:
 
 ```bash
-git tag project
-git push origin project
+make test          # Run all tests with race detection
+make test-verbose  # Run tests with verbose output
+```
+
+**Run linting**:
+
+```bash
+make lint          # Run golangci-lint and security checks
+```
+
+**Git Hooks**:
+The pre-push hook automatically runs before each `git push` to ensure:
+
+- All tests pass (including race detection)
+- Code passes all linting checks
+
+To bypass the hook (not recommended):
+
+```bash
+git push --no-verify
+```
+
+## Usage
+
+Submit assignments for grading:
+
+```bash
+# Project 1
+./gradebot project1 --dir /path/to/project --run "python main.py"
 ```
